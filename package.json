@@ -36,7 +36,8 @@
   },
   "build": {
     "appId": "com.sgm.desktop",
-    "productName": "SGM Desktop",
+    "productName": "SGM",
+    "artifactName": "SGM Setup ${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -46,10 +47,16 @@
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
+      "executableName": "SGM",
       "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "shortcutName": "SGM",
+      "uninstallDisplayName": "SGM"
     }
   }
 }

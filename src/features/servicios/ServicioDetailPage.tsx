@@ -10,6 +10,7 @@ import { getServicioTemplates, type ServicioTemplate } from "../../api/servicioT
 import {
   addServicioPago,
   changeServicioEstado,
+  deleteServicio,
   getServicioById,
   getServicioEstadoHist,
   getServicioPagos,
@@ -47,6 +48,8 @@ export default function ServicioDetailPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [msgApi, ctx] = message.useMessage();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
 
   if (!id) return null;
 
@@ -131,6 +134,21 @@ export default function ServicioDetailPage() {
       qc.invalidateQueries({ queryKey: ["servicio", id] });
     },
     onError: (err: any) => msgApi.error(err?.response?.data?.message ?? "No se pudo resetear"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: () => deleteServicio(id, { reason: deleteReason.trim() || undefined }),
+    onSuccess: (r) => {
+      msgApi.success(r.mode === "deleted" ? "Servicio eliminado" : "Servicio cancelado");
+      setDeleteOpen(false);
+      setDeleteReason("");
+      qc.invalidateQueries({ queryKey: ["servicios"] });
+      qc.invalidateQueries({ queryKey: ["servicio", id] });
+      nav("/servicios");
+    },
+    onError: (err: any) => {
+      msgApi.error(err?.response?.data?.message ?? "No se pudo eliminar el servicio");
+    },
   });
 
   // -------- Pagos --------
@@ -248,6 +266,9 @@ export default function ServicioDetailPage() {
           </div>
 
           <Space>
+            <Button danger disabled={locked || !servicio} onClick={() => setDeleteOpen(true)}>
+              Eliminar
+            </Button>
             <Button onClick={() => nav("/servicios")}>Volver</Button>
           </Space>
         </Space>
@@ -437,6 +458,26 @@ export default function ServicioDetailPage() {
           />
         </Card>
       </Space>
+
+      <Modal
+        title="Eliminar servicio"
+        open={deleteOpen}
+        onCancel={() => setDeleteOpen(false)}
+        onOk={() => deleteMut.mutate()}
+        okText="Eliminar servicio"
+        okButtonProps={{ danger: true, loading: deleteMut.isPending, disabled: locked || !servicio }}
+      >
+        <Typography.Paragraph>
+          Esta accion intentara eliminar el servicio. Si el backend no soporta DELETE, se marcara como CANCELADO.
+        </Typography.Paragraph>
+        <Input.TextArea
+          rows={3}
+          value={deleteReason}
+          onChange={(e) => setDeleteReason(e.target.value)}
+          placeholder="Motivo (opcional)"
+          disabled={deleteMut.isPending}
+        />
+      </Modal>
     </>
   );
 }

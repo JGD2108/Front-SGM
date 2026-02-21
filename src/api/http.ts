@@ -24,6 +24,9 @@ api.interceptors.response.use(
   async (err) => {
     if (err?.response?.status === 401) {
       await clearToken();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("auth:unauthorized"));
+      }
     }
     return Promise.reject(err);
   }

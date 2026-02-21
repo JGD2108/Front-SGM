@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Drawer,
+  Input,
   Space,
   Table,
   Tag,
@@ -30,8 +31,58 @@ import {
   uploadTramiteFile,
 } from "../../../api/tramiteDocumentos";
 
+const OTHER_DOC_KEY = "OTRO";
+const CUSTOM_DOC_PREFIX = "CUSTOM__";
+const ACCEPTED_DOC_EXTENSIONS = [".pdf"];
+const ACCEPTED_DOC_MIME_TYPES = new Set(["application/pdf"]);
+const UPLOAD_ACCEPT = ".pdf,application/pdf";
+
 function normDocKey(x: any): string {
   return String(x?.docKey ?? x?.doc_key ?? x?.tipo ?? x?.key ?? x?.docType ?? "");
+}
+
+function isAllowedDoc(file: File): boolean {
+  const name = file.name.toLowerCase();
+  if (ACCEPTED_DOC_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;
+  return ACCEPTED_DOC_MIME_TYPES.has((file.type ?? "").toLowerCase());
+}
+
+function getCustomLabelFromDocKey(docKey: string): string | null {
+  if (!docKey.startsWith(CUSTOM_DOC_PREFIX)) return null;
+  const slug = docKey.slice(CUSTOM_DOC_PREFIX.length);
+  if (!slug) return "Documento";
+
+  return slug
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function sanitizeFilenameBase(name: string): string {
+  const clean = name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ");
+  return clean || "documento";
+}
+
+function getPreferredExtension(file: File): string {
+  const lower = file.name.toLowerCase();
+  const byName = ACCEPTED_DOC_EXTENSIONS.find((ext) => lower.endsWith(ext));
+  if (byName) return byName;
+  return ".pdf";
+}
+
+function renameFileWithLabel(file: File, label: string): File {
+  const ext = getPreferredExtension(file);
+  const base = sanitizeFilenameBase(label);
+  const filename = base.toLowerCase().endsWith(ext) ? base : `${base}${ext}`;
+
+  return new File([file], filename, {
+    type: file.type || "application/octet-stream",
+    lastModified: file.lastModified,
+  });
 }
 
 // ===== Tipos UI estables (no dependen de mock/backend) =====
@@ -101,6 +152,7 @@ function normalizeFileRow(raw: any): FileRow {
 export default function DocumentosTab(props: { tramiteId: string; locked: boolean }) {
   const qc = useQueryClient();
   const [msgApi, ctx] = message.useMessage();
+  const [customDocName, setCustomDocName] = useState("");
 
   const checklistQuery = useQuery({
     queryKey: ["tramiteChecklist", props.tramiteId],
@@ -115,6 +167,14 @@ export default function DocumentosTab(props: { tramiteId: string; locked: boolea
   const checklistRows: ChecklistRow[] = useMemo(() => {
     return (checklistQuery.data ?? []).map(normalizeChecklistRow);
   }, [checklistQuery.data]);
+
+  const customTargetDocKey = useMemo(() => {
+    const keys = new Set(checklistRows.map((x) => x.docKey));
+    if (keys.has(OTHER_DOC_KEY)) return OTHER_DOC_KEY;
+    if (keys.has("DOCS_FISICOS")) return "DOCS_FISICOS";
+    if (keys.has("DOC_FISICO")) return "DOC_FISICO";
+    return null;
+  }, [checklistRows]);
 
   const fileRows: FileRow[] = useMemo(() => {
     return (filesQuery.data ?? []).map(normalizeFileRow);
@@ -134,29 +194,52 @@ export default function DocumentosTab(props: { tramiteId: string; locked: boolea
     return map;
   }, [fileRows]);
 
+  const checklistRowsMerged: ChecklistRow[] = useMemo(() => {
+    const base = [...checklistRows];
+    const seen = new Set(base.map((r) => r.docKey));
+
+    for (const [docKey, files] of filesByDocKey.entries()) {
+      if (seen.has(docKey)) continue;
+
+      base.push({
+        id: `virtual-${docKey}`,
+        docKey,
+        name_snapshot: getCustomLabelFromDocKey(docKey) ?? docKey,
+        required: false,
+        status: files.length > 0 ? "RECIBIDO" : "PENDIENTE",
+        received_at: files[0]?.uploaded_at ?? null,
+      });
+      seen.add(docKey);
+    }
+
+    return base;
+  }, [checklistRows, filesByDocKey]);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDocKey, setDrawerDocKey] = useState<string>("");
 
   const selectedFiles = filesByDocKey.get(drawerDocKey) ?? [];
 
   const drawerTitle = useMemo(() => {
-    const item = checklistRows.find((c) => c.docKey === drawerDocKey);
+    const item = checklistRowsMerged.find((c) => c.docKey === drawerDocKey);
     return item ? `Versiones - ${item.name_snapshot}` : `Versiones - ${drawerDocKey}`;
-  }, [drawerDocKey, checklistRows]);
+  }, [drawerDocKey, checklistRowsMerged]);
 
   const uploadMut = useMutation({
-    mutationFn: (p: { docKey: string; file: File }) =>
-      uploadTramiteFile(props.tramiteId, p),
-    onSuccess: async (_data, vars) => {
+    mutationFn: async (p: { docKey: string; file: File }) => {
+      await uploadTramiteFile(props.tramiteId, { docKey: p.docKey, file: p.file });
+      return { docKeyUsed: p.docKey };
+    },
+    onSuccess: async (data) => {
       msgApi.success("Documento subido");
       await qc.invalidateQueries({ queryKey: ["tramiteChecklist", props.tramiteId] });
       await qc.invalidateQueries({ queryKey: ["tramiteFiles", props.tramiteId] });
 
-      setDrawerDocKey(vars.docKey);
+      setDrawerDocKey(data.docKeyUsed);
       setDrawerOpen(true);
     },
     onError: (err: any) => {
-      msgApi.error(err?.response?.data?.message ?? "No se pudo subir el PDF");
+      msgApi.error(err?.response?.data?.message ?? "No se pudo subir el archivo");
     },
   });
 
@@ -164,16 +247,48 @@ export default function DocumentosTab(props: { tramiteId: string; locked: boolea
     const file = opt.file as File;
     const docKey = String(docKeyRaw);
 
-    const isPdf =
-      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
+    if (!isAllowedDoc(file)) {
       msgApi.error("Solo se permiten PDFs.");
-      opt.onError?.(new Error("NOT_PDF"));
+      opt.onError?.(new Error("NOT_ALLOWED_FILE"));
       return;
     }
 
     try {
       await uploadMut.mutateAsync({ docKey, file });
+      opt.onSuccess?.({}, file);
+    } catch (e) {
+      opt.onError?.(e as any);
+    }
+  };
+
+  const onCustomNamedUpload = async (opt: UploadRequestOption) => {
+    const file = opt.file as File;
+    const label = customDocName.trim();
+
+    if (!label) {
+      msgApi.error("Escribe un nombre para el documento antes de subir.");
+      opt.onError?.(new Error("MISSING_LABEL"));
+      return;
+    }
+
+    if (!isAllowedDoc(file)) {
+      msgApi.error("Solo se permiten PDFs.");
+      opt.onError?.(new Error("NOT_ALLOWED_FILE"));
+      return;
+    }
+
+    if (!customTargetDocKey) {
+      msgApi.error("No hay un tipo de documento flexible disponible en el checklist.");
+      opt.onError?.(new Error("NO_CUSTOM_DOC_KEY"));
+      return;
+    }
+
+    try {
+      const renamed = renameFileWithLabel(file, label);
+      await uploadMut.mutateAsync({
+        docKey: customTargetDocKey,
+        file: renamed,
+      });
       opt.onSuccess?.({}, file);
     } catch (e) {
       opt.onError?.(e as any);
@@ -242,13 +357,14 @@ export default function DocumentosTab(props: { tramiteId: string; locked: boolea
         return (
           <Space>
             <Upload
-              accept=".pdf,application/pdf"
+              accept={UPLOAD_ACCEPT}
+              multiple
               showUploadList={false}
               disabled={props.locked}
               customRequest={onCustomUpload(key)}
             >
               <Button icon={<UploadOutlined />} disabled={props.locked} loading={uploadMut.isPending}>
-                Subir PDF
+                Subir archivo
               </Button>
             </Upload>
 
@@ -284,15 +400,49 @@ export default function DocumentosTab(props: { tramiteId: string; locked: boolea
             type="info"
             showIcon
             message="Regla importante"
-            description="Solo PDFs. El backend validará máximo 10 páginas."
+            description="Solo PDFs. El backend validará máximo 15 páginas."
           />
         )}
 
-        <Card title="Checklist de documentos" loading={checklistQuery.isLoading}>
+        <Card title="Documentos personalizados">
+          <Space wrap size={12}>
+            <Input
+              placeholder="Nombre del documento (ej. Foto placa)"
+              value={customDocName}
+              onChange={(e) => setCustomDocName(e.target.value)}
+              style={{ width: 320 }}
+              disabled={props.locked}
+            />
+            <Upload
+              accept={UPLOAD_ACCEPT}
+              multiple
+              showUploadList={false}
+              disabled={props.locked || !customDocName.trim() || !customTargetDocKey}
+              customRequest={onCustomNamedUpload}
+            >
+              <Button
+                icon={<UploadOutlined />}
+                disabled={props.locked || !customDocName.trim() || !customTargetDocKey}
+                loading={uploadMut.isPending}
+              >
+                Subir con nombre
+              </Button>
+            </Upload>
+          </Space>
+          <div style={{ marginTop: 8 }}>
+            <Typography.Text type="secondary">
+              {customTargetDocKey
+                ? "Escribe el nombre y luego selecciona uno o varios archivos."
+                : "El backend no expone un docKey flexible (OTRO/DOCS_FISICOS). Usa los botones del checklist."}
+            </Typography.Text>
+          </div>
+        </Card>
+
+        <Card title="Checklist de documentos" loading={checklistQuery.isLoading || filesQuery.isLoading}>
           <Table<ChecklistRow>
             rowKey={(r) => r.id}
             columns={columns}
-            dataSource={checklistRows}
+            dataSource={checklistRowsMerged}
             pagination={false}
             scroll={{ x: 1000 }}
           />

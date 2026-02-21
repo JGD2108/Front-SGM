@@ -14,6 +14,14 @@ export type ServicioEstado =
   | "CANCELADO"
   | string;
 
+function isHtmlResponse(data: unknown): boolean {
+  return typeof data === "string" && data.toLowerCase().includes("<!doctype html");
+}
+
+function isRouteMissing(status: number): boolean {
+  return status === 404 || status === 405 || status === 501;
+}
+
 // =========
 // LISTADO
 // =========
@@ -166,6 +174,52 @@ export type PatchServicioInput = {
 export async function patchServicio(id: string, payload: PatchServicioInput): Promise<ServicioDetail> {
   const res = await api.patch(`/servicios/${id}`, payload, { headers: { Accept: "application/json" } });
   return res.data;
+}
+
+export type DeleteServicioResult = {
+  ok: true;
+  mode: "deleted" | "cancelled";
+};
+
+/**
+ * ✅ DELETE /servicios/:id
+ * Fallbacks:
+ * - POST /servicios/:id/cancelar
+ * - POST /servicios/:id/estado { toEstado: "CANCELADO" }
+ */
+export async function deleteServicio(
+  id: string,
+  payload?: { reason?: string }
+): Promise<DeleteServicioResult> {
+  try {
+    const res = await api.delete(`/servicios/${id}`, { headers: { Accept: "application/json" } });
+    if (isHtmlResponse(res.data)) throw new Error("HTML_RESPONSE");
+    return { ok: true, mode: "deleted" };
+  } catch (e: any) {
+    const status = Number(e?.response?.status ?? 0);
+    if (!isRouteMissing(status)) throw e;
+  }
+
+  try {
+    const res = await api.post(
+      `/servicios/${id}/cancelar`,
+      { reason: payload?.reason },
+      { headers: { Accept: "application/json" } }
+    );
+    if (isHtmlResponse(res.data)) throw new Error("HTML_RESPONSE");
+    return { ok: true, mode: "cancelled" };
+  } catch (e: any) {
+    const status = Number(e?.response?.status ?? 0);
+    if (!isRouteMissing(status)) throw e;
+  }
+
+  const res = await api.post(
+    `/servicios/${id}/estado`,
+    { toEstado: "CANCELADO", notes: payload?.reason },
+    { headers: { Accept: "application/json" } }
+  );
+  if (isHtmlResponse(res.data)) throw new Error("HTML_RESPONSE");
+  return { ok: true, mode: "cancelled" };
 }
 
 // =========

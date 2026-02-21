@@ -40,6 +40,7 @@ export default function ResumenTab(props: { tramiteId: string; locked: boolean }
   const qc = useQueryClient();
   const [msgApi, ctx] = message.useMessage();
   const [form] = Form.useForm<{ honorariosValor: number }>();
+  const honorariosFormValue = Form.useWatch("honorariosValor", form);
 
   // usa cache del mismo queryKey ["tramite", id]
   const tramiteQuery = useQuery({
@@ -90,7 +91,7 @@ export default function ResumenTab(props: { tramiteId: string; locked: boolean }
     return Number.isFinite(n) ? n : 0;
   }, [tramite]);
 
-  const totalFinal = subtotalEmpresa + honorariosBackend;
+  const totalFinal = subtotalEmpresa + Number(honorariosFormValue ?? honorariosBackend);
 
   // ✅ sincroniza form con backend (cuando cargue/actualice)
   useEffect(() => {
@@ -297,7 +298,7 @@ export default function ResumenTab(props: { tramiteId: string; locked: boolean }
 
             <div>
               <Typography.Text>Total final (empresa + honorarios): </Typography.Text>
-              <Typography.Text strong>{money(subtotalEmpresa + Number(form.getFieldValue("honorariosValor") ?? honorariosBackend))}</Typography.Text>
+              <Typography.Text strong>{money(totalFinal)}</Typography.Text>
             </div>
           </Space>
         </Card>

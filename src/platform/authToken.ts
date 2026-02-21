@@ -1,20 +1,44 @@
+const AUTH_CHANGED_EVENT = "auth:changed";
+
+function normalizeToken(token: string): string {
+  return token.replace(/^Bearer\s+/i, "").trim();
+}
+
+function notifyAuthChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  }
+}
+
 export async function getToken(): Promise<string | null> {
-  if (window.electronAPI?.getToken) return window.electronAPI.getToken();
-  return sessionStorage.getItem("token");
+  const raw = window.electronAPI?.getToken
+    ? await window.electronAPI.getToken()
+    : sessionStorage.getItem("token");
+
+  if (!raw) return null;
+  const normalized = normalizeToken(raw);
+  return normalized.length > 0 ? normalized : null;
 }
 
 export async function setToken(token: string): Promise<void> {
+  const normalized = normalizeToken(token);
+  if (!normalized) return;
+
   if (window.electronAPI?.setToken) {
-    await window.electronAPI.setToken(token);
-    return;
+    await window.electronAPI.setToken(normalized);
+  } else {
+    sessionStorage.setItem("token", normalized);
   }
-  sessionStorage.setItem("token", token);
+
+  notifyAuthChanged();
 }
 
 export async function clearToken(): Promise<void> {
   if (window.electronAPI?.clearToken) {
     await window.electronAPI.clearToken();
-    return;
+  } else {
+    sessionStorage.removeItem("token");
   }
-  sessionStorage.removeItem("token");
+
+  notifyAuthChanged();
 }

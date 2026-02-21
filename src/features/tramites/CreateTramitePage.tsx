@@ -173,7 +173,7 @@ export default function CreateTramitePage() {
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">Arrastra la factura PDF aquí o haz clic para seleccionar</p>
-            <p className="ant-upload-hint">Máximo 1 archivo. El backend validará máximo 10 páginas.</p>
+            <p className="ant-upload-hint">Máximo 1 archivo. El backend validará máximo 15 páginas.</p>
           </Dragger>
 
           <Space style={{ marginTop: 16 }}>

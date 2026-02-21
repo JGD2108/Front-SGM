@@ -1,13 +1,13 @@
 // src/features/servicios/ServiciosListPage.tsx
-import { Button, Card, Form, Input, Select, Space, Table, Tag, Typography } from "antd";
+import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs from "dayjs";
 
 import { getServicioTemplates } from "../../api/servicioTemplates";
-import { listServicios, type ServicioListItem, type ServiciosListFilters, type ServicioEstado } from "../../api/servicios";
+import { deleteServicio, listServicios, type ServicioEstado, type ServicioListItem, type ServiciosListFilters } from "../../api/servicios";
 
 const ESTADOS: ServicioEstado[] = [
   "RECIBIDO",
@@ -29,6 +29,8 @@ function estadoTag(e: string) {
 
 export default function ServiciosListPage() {
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const [msgApi, ctx] = message.useMessage();
   const [form] = Form.useForm<ServiciosListFilters>();
 
   const templatesQuery = useQuery({
@@ -42,6 +44,17 @@ export default function ServiciosListPage() {
   const listQuery = useQuery({
     queryKey: ["servicios", filters],
     queryFn: () => listServicios(filters ?? { page: 1, pageSize: 20 }),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (servicioId: string) => deleteServicio(servicioId),
+    onSuccess: (r) => {
+      msgApi.success(r.mode === "deleted" ? "Servicio eliminado" : "Servicio cancelado");
+      qc.invalidateQueries({ queryKey: ["servicios"] });
+    },
+    onError: (e: any) => {
+      msgApi.error(e?.response?.data?.message ?? "No se pudo eliminar el servicio");
+    },
   });
 
   const tipoLabel = useMemo(() => {
@@ -80,70 +93,94 @@ export default function ServiciosListPage() {
     {
       title: "Acción",
       key: "action",
-      width: 120,
+      width: 220,
       render: (_, r) => (
-        <Button type="link" onClick={() => nav(`/servicios/${r.id}`)}>
-          Ver
-        </Button>
+        <Space size={0}>
+          <Button type="link" onClick={() => nav(`/servicios/${r.id}`)}>
+            Ver
+          </Button>
+          <Button
+            type="link"
+            danger
+            disabled={r.estado_servicio === "ENTREGADO" || r.estado_servicio === "CANCELADO"}
+            loading={deleteMut.isPending && deleteMut.variables === r.id}
+            onClick={() =>
+              Modal.confirm({
+                title: "Eliminar servicio",
+                content: "Se intentara eliminar el servicio. Si no existe DELETE, se marcara como CANCELADO.",
+                okText: "Eliminar",
+                okButtonProps: { danger: true },
+                cancelText: "Cancelar",
+                onOk: () => deleteMut.mutateAsync(r.id),
+              })
+            }
+          >
+            Eliminar
+          </Button>
+        </Space>
       ),
     },
   ];
 
   return (
-    <Space direction="vertical" size={12} style={{ width: "100%" }}>
-      <Space style={{ justifyContent: "space-between", width: "100%" }}>
-        <Typography.Title level={3} style={{ margin: 0 }}>
-          Servicios
-        </Typography.Title>
+    <>
+      {ctx}
 
-        <Button type="primary" onClick={() => nav(`/servicios/nuevo`)}>
-          Nuevo servicio
-        </Button>
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <Space style={{ justifyContent: "space-between", width: "100%" }}>
+          <Typography.Title level={3} style={{ margin: 0 }}>
+            Servicios
+          </Typography.Title>
+
+          <Button type="primary" onClick={() => nav(`/servicios/nuevo`)}>
+            Nuevo servicio
+          </Button>
+        </Space>
+
+        <Card title="Filtros">
+          <Form
+            form={form}
+            layout="vertical"
+            initialValues={{ page: 1, pageSize: 20, includeCancelados: false }}
+          >
+            <Space wrap style={{ width: "100%" }} size={12}>
+              <Form.Item label="Concesionario" name="concesionarioCode" style={{ width: 200 }}>
+                <Input placeholder="Ej: AUTOTROPICAL" />
+              </Form.Item>
+
+              <Form.Item label="Ciudad" name="ciudad" style={{ width: 200 }}>
+                <Input placeholder="Ej: Barranquilla" />
+              </Form.Item>
+
+              <Form.Item label="Tipo servicio" name="tipoServicio" style={{ width: 220 }}>
+                <Select
+                  allowClear
+                  loading={templatesQuery.isLoading}
+                  options={(templatesQuery.data ?? []).map((t) => ({ value: t.tipo, label: t.nombre }))}
+                />
+              </Form.Item>
+
+              <Form.Item label="Estado" name="estadoServicio" style={{ width: 220 }}>
+                <Select allowClear options={ESTADOS.map((e) => ({ value: e, label: e }))} />
+              </Form.Item>
+
+              <Form.Item label="Cliente doc" name="clienteDoc" style={{ width: 200 }}>
+                <Input placeholder="CC / NIT" />
+              </Form.Item>
+            </Space>
+          </Form>
+        </Card>
+
+        <Card title="Bandeja" loading={listQuery.isLoading}>
+          <Table<ServicioListItem>
+            rowKey="id"
+            columns={columns}
+            dataSource={listQuery.data?.items ?? []}
+            pagination={false}
+            scroll={{ x: 1400 }}
+          />
+        </Card>
       </Space>
-
-      <Card title="Filtros">
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ page: 1, pageSize: 20, includeCancelados: false }}
-        >
-          <Space wrap style={{ width: "100%" }} size={12}>
-            <Form.Item label="Concesionario" name="concesionarioCode" style={{ width: 200 }}>
-              <Input placeholder="Ej: AUTOTROPICAL" />
-            </Form.Item>
-
-            <Form.Item label="Ciudad" name="ciudad" style={{ width: 200 }}>
-              <Input placeholder="Ej: Barranquilla" />
-            </Form.Item>
-
-            <Form.Item label="Tipo servicio" name="tipoServicio" style={{ width: 220 }}>
-              <Select
-                allowClear
-                loading={templatesQuery.isLoading}
-                options={(templatesQuery.data ?? []).map((t) => ({ value: t.tipo, label: t.nombre }))}
-              />
-            </Form.Item>
-
-            <Form.Item label="Estado" name="estadoServicio" style={{ width: 220 }}>
-              <Select allowClear options={ESTADOS.map((e) => ({ value: e, label: e }))} />
-            </Form.Item>
-
-            <Form.Item label="Cliente doc" name="clienteDoc" style={{ width: 200 }}>
-              <Input placeholder="CC / NIT" />
-            </Form.Item>
-          </Space>
-        </Form>
-      </Card>
-
-      <Card title="Bandeja" loading={listQuery.isLoading}>
-        <Table<ServicioListItem>
-          rowKey="id"
-          columns={columns}
-          dataSource={listQuery.data?.items ?? []}
-          pagination={false}
-          scroll={{ x: 1400 }}
-        />
-      </Card>
-    </Space>
+    </>
   );
 }

@@ -24,6 +24,16 @@ export default function AuthGate() {
     };
   }, [location.pathname]);
 
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setHasToken(false);
+      setLoading(false);
+    };
+
+    window.addEventListener("auth:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
+  }, []);
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>

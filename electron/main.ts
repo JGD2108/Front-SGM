@@ -1,8 +1,9 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
-import { registerAuthIpc } from "./ipc-auth";
+import { clearStoredAuthToken, registerAuthIpc } from "./ipc-auth";
 
 const isDev = !app.isPackaged;
+const appName = "SGM";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -15,7 +16,11 @@ function hardenWebContents(win: BrowserWindow) {
 }
 
 async function createWindow() {
+  const iconPath = isDev ? path.join(app.getAppPath(), "build", "icon.ico") : undefined;
+
   mainWindow = new BrowserWindow({
+    title: appName,
+    icon: iconPath,
     width: 1200,
     height: 800,
     webPreferences: {
@@ -30,15 +35,18 @@ async function createWindow() {
   hardenWebContents(mainWindow);
 
   if (isDev) {
-    await mainWindow.loadURL("http://localhost:5173");
+    await mainWindow.loadURL("http://localhost:5173/#/login");
     mainWindow.webContents.openDevTools();
   } else {
-    await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+    await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"), { hash: "/login" });
   }
 }
 
 app.whenReady().then(() => {
+  app.setName(appName);
+  app.setAppUserModelId("com.sgm.desktop");
   registerAuthIpc();
+  clearStoredAuthToken();
   return createWindow();
 });
 

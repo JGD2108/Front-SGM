@@ -40,18 +40,28 @@ export default function PagosTab(props: { tramiteId: string; locked: boolean }) 
 
   const createMut = useMutation({
     mutationFn: (payload: any) => createPayment(props.tramiteId, payload),
-    onSuccess: () => {
+    onSuccess: (created: PaymentRecord) => {
       msgApi.success("Pago registrado");
-      qc.invalidateQueries({ queryKey: ["tramitePayments", props.tramiteId] });
+      qc.setQueryData<PaymentRecord[]>(["tramitePayments", props.tramiteId], (prev) => {
+        const current = Array.isArray(prev) ? prev : [];
+        if (current.some((p) => p.id === created.id)) return current;
+        return [created, ...current];
+      });
+      qc.invalidateQueries({ queryKey: ["tramitePayments", props.tramiteId], refetchType: "active" });
+      qc.invalidateQueries({ queryKey: ["tramite", props.tramiteId] });
     },
     onError: (err: any) => msgApi.error(err?.response?.data?.message ?? "No se pudo registrar el pago"),
   });
 
   const delMut = useMutation({
     mutationFn: (paymentId: string) => deletePayment(props.tramiteId, paymentId),
-    onSuccess: () => {
+    onSuccess: (_, paymentId) => {
       msgApi.success("Pago eliminado");
-      qc.invalidateQueries({ queryKey: ["tramitePayments", props.tramiteId] });
+      qc.setQueryData<PaymentRecord[]>(["tramitePayments", props.tramiteId], (prev) =>
+        (prev ?? []).filter((p) => p.id !== paymentId)
+      );
+      qc.invalidateQueries({ queryKey: ["tramitePayments", props.tramiteId], refetchType: "active" });
+      qc.invalidateQueries({ queryKey: ["tramite", props.tramiteId] });
     },
     onError: () => msgApi.error("No se pudo eliminar"),
   });
@@ -179,10 +189,9 @@ function PaymentsSection(props: {
     const v = await form.validateFields();
     props.onCreate.mutate({
       type: props.type,
-      valor: v.valor,
+      valor: Number(v.valor),
       fecha: v.fecha,
       medio_pago: v.medio_pago,
-      cuenta: v.cuenta,
       notes: v.notes,
       attachment: file,
     });
@@ -217,9 +226,12 @@ function PaymentsSection(props: {
               <Input placeholder="YYYY-MM-DD" style={{ width: 180 }} />
             </Form.Item>
 
-            <Form.Item label="Medio pago" name="medio_pago">
+            <Form.Item
+              label="Medio de pago"
+              name="medio_pago"
+              rules={[{ required: true, message: "Selecciona el medio de pago" }]}
+            >
               <Select
-                allowClear
                 style={{ width: 200 }}
                 options={[
                   { value: "EFECTIVO", label: "Efectivo" },
@@ -229,10 +241,6 @@ function PaymentsSection(props: {
                   { value: "OTRO", label: "Otro" },
                 ]}
               />
-            </Form.Item>
-
-            <Form.Item label="Cuenta" name="cuenta">
-              <Input style={{ width: 220 }} placeholder="Caja / cuenta / banco" />
             </Form.Item>
           </Space>
 

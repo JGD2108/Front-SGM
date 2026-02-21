@@ -43,3 +43,7 @@ export function registerAuthIpc() {
     return true;
   });
 }
+
+export function clearStoredAuthToken() {
+  store.delete(TOKEN_KEY);
+}
