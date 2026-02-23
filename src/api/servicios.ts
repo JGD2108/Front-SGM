@@ -129,6 +129,10 @@ export type ServicioPago = {
   id: string;
   concepto: string;
   valor: number;
+  anio?: string | null;
+  valor_total?: number | null;
+  valor_4x1000?: number | null;
+  observacion?: string | null;
   created_at: string;
 };
 
@@ -146,6 +150,10 @@ export type ServicioDetail = {
   gestor_nombre: string | null;
   gestor_telefono: string | null;
   service_data: Record<string, any> | null;
+  created_at?: string;
+  placa?: string | null;
+  honorariosValor?: number | string | null;
+  honorarios_valor?: number | string | null;
 
   pagos: ServicioPago[];
   total_pagos_servicio: number;
@@ -166,6 +174,7 @@ export type PatchServicioInput = {
   serviceData?: Record<string, any> | null;
   gestorNombre?: string;
   gestorTelefono?: string;
+  honorariosValor?: number | string | null;
 };
 
 /**
@@ -265,6 +274,27 @@ export type ServicioPagosResponse = {
   items: ServicioPago[];
 };
 
+function parsePagoNumber(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeServicioPago(raw: any): ServicioPago {
+  const valorTotal = raw?.valor_total ?? raw?.valorTotal ?? raw?.valor ?? 0;
+  const valor4x1000 = raw?.valor_4x1000 ?? raw?.valor4x1000 ?? raw?.cuatro_x_mil ?? raw?.cuatroXMil ?? 0;
+
+  return {
+    id: String(raw?.id ?? `${Date.now()}-${Math.random()}`),
+    concepto: String(raw?.concepto ?? raw?.nombre ?? raw?.descripcion ?? ""),
+    valor: parsePagoNumber(raw?.valor ?? valorTotal),
+    anio: raw?.anio != null ? String(raw.anio) : raw?.ano != null ? String(raw.ano) : null,
+    valor_total: parsePagoNumber(valorTotal),
+    valor_4x1000: parsePagoNumber(valor4x1000),
+    observacion: raw?.observacion ?? raw?.notes ?? raw?.nota ?? null,
+    created_at: String(raw?.created_at ?? raw?.fecha ?? new Date().toISOString()),
+  };
+}
+
 /**
  * ✅ GET /servicios/:id/pagos
  */
@@ -272,10 +302,12 @@ export async function listServicioPagos(id: string): Promise<ServicioPagosRespon
   const res = await api.get(`/servicios/${id}/pagos`, { headers: { Accept: "application/json" } });
   const data = res.data;
 
-  if (Array.isArray(data)) return { total: data.length, items: data as any };
+  if (Array.isArray(data)) {
+    return { total: data.length, items: data.map((x: any) => normalizeServicioPago(x)) };
+  }
   return {
     total: Number(data?.total ?? 0),
-    items: Array.isArray(data?.items) ? data.items : [],
+    items: Array.isArray(data?.items) ? data.items.map((x: any) => normalizeServicioPago(x)) : [],
   };
 }
 
@@ -291,10 +323,32 @@ export async function getServicioPagos(id: string): Promise<ServicioPagosRespons
  */
 export async function createServicioPago(
   id: string,
-  payload: { concepto: string; valor: number }
+  payload: {
+    concepto: string;
+    valor?: number;
+    anio?: string | number | null;
+    valorTotal?: number;
+    valor_total?: number;
+    valor4x1000?: number;
+    valor_4x1000?: number;
+    observacion?: string;
+  }
 ): Promise<{ ok: true } | ServicioPago> {
-  const res = await api.post(`/servicios/${id}/pagos`, payload, { headers: { Accept: "application/json" } });
-  return res.data ?? { ok: true };
+  const total = parsePagoNumber(payload.valor_total ?? payload.valorTotal ?? payload.valor ?? 0);
+  const cuatro = parsePagoNumber(payload.valor_4x1000 ?? payload.valor4x1000 ?? 0);
+
+  const body = {
+    concepto: String(payload.concepto ?? "").trim(),
+    anio: payload.anio != null && String(payload.anio).trim() !== "" ? String(payload.anio).trim() : undefined,
+    valor: total,
+    valor_total: total,
+    valor_4x1000: cuatro,
+    observacion: payload.observacion?.trim() || undefined,
+  };
+
+  const res = await api.post(`/servicios/${id}/pagos`, body, { headers: { Accept: "application/json" } });
+  if (!res.data || res.data.ok === true) return { ok: true };
+  return normalizeServicioPago(res.data);
 }
 
 /**
@@ -302,7 +356,16 @@ export async function createServicioPago(
  */
 export async function addServicioPago(
   id: string,
-  payload: { concepto: string; valor: number }
+  payload: {
+    concepto: string;
+    valor?: number;
+    anio?: string | number | null;
+    valorTotal?: number;
+    valor_total?: number;
+    valor4x1000?: number;
+    valor_4x1000?: number;
+    observacion?: string;
+  }
 ): Promise<{ ok: true } | ServicioPago> {
   return createServicioPago(id, payload);
 }

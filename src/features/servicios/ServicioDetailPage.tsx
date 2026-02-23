@@ -8,18 +8,16 @@ import dayjs from "dayjs";
 
 import { getServicioTemplates, type ServicioTemplate } from "../../api/servicioTemplates";
 import {
-  addServicioPago,
   changeServicioEstado,
   deleteServicio,
   getServicioById,
   getServicioEstadoHist,
-  getServicioPagos,
   patchServicio,
   type ServicioEstado,
-  type ServicioPago,
   type ServicioEstadoHistItem,
 } from "../../api/servicios";
 import { buildInitialServiceData, sanitizeServiceDataForSave } from "../../api/servicioUtils";
+import ServicioPagosTab from "./tabs/ServicioPagosTab";
 
 const ESTADOS: ServicioEstado[] = [
   "RECIBIDO",
@@ -37,10 +35,6 @@ function estadoTag(e: ServicioEstado) {
   if (e === "ENTREGADO") return <Tag color="green">ENTREGADO</Tag>;
   if (e === "CANCELADO") return <Tag color="red">CANCELADO</Tag>;
   return <Tag>{e}</Tag>;
-}
-
-function money(n: number) {
-  return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(Number(n) || 0);
 }
 
 export default function ServicioDetailPage() {
@@ -62,11 +56,6 @@ export default function ServicioDetailPage() {
   const servicioQuery = useQuery({
     queryKey: ["servicio", id],
     queryFn: () => getServicioById(id),
-  });
-
-  const pagosQuery = useQuery({
-    queryKey: ["servicioPagos", id],
-    queryFn: () => getServicioPagos(id),
   });
 
   const histQuery = useQuery({
@@ -151,22 +140,6 @@ export default function ServicioDetailPage() {
     },
   });
 
-  // -------- Pagos --------
-  const [pagoOpen, setPagoOpen] = useState(false);
-  const [pagoForm] = Form.useForm<{ concepto: string; valor: number }>();
-
-  const addPagoMut = useMutation({
-    mutationFn: (v: { concepto: string; valor: number }) => addServicioPago(id, v),
-    onSuccess: () => {
-      msgApi.success("Pago agregado");
-      setPagoOpen(false);
-      pagoForm.resetFields();
-      qc.invalidateQueries({ queryKey: ["servicioPagos", id] });
-      qc.invalidateQueries({ queryKey: ["servicio", id] });
-    },
-    onError: (err: any) => msgApi.error(err?.response?.data?.message ?? "No se pudo agregar pago"),
-  });
-
   // -------- Estados --------
   const [estadoForm] = Form.useForm<{ toEstado: ServicioEstado; notes?: string }>();
 
@@ -179,13 +152,6 @@ export default function ServicioDetailPage() {
     },
     onError: (err: any) => msgApi.error(err?.response?.data?.message ?? "No se pudo cambiar estado"),
   });
-
-  const pagosCols: ColumnsType<ServicioPago> = [
-    { title: "Fecha", dataIndex: "created_at", key: "created_at", width: 160, render: (iso: string) => (iso ? dayjs(iso).format("YYYY-MM-DD HH:mm") : "—") },
-    { title: "Concepto", dataIndex: "concepto", key: "concepto" },
-    { title: "Valor", dataIndex: "valor", key: "valor", width: 160, render: (v: number) => <Typography.Text strong>{money(v)}</Typography.Text> },
-  ];
-
   const histCols: ColumnsType<ServicioEstadoHistItem> = [
     { title: "Fecha", dataIndex: "changed_at", key: "changed_at", width: 180, render: (iso: string) => (iso ? dayjs(iso).format("YYYY-MM-DD HH:mm") : "—") },
     { title: "Usuario", dataIndex: "changed_by", key: "changed_by", width: 160 },
@@ -365,53 +331,12 @@ export default function ServicioDetailPage() {
                 key: "pagos",
                 label: "Pagos",
                 children: (
-                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                    <Card>
-                      <Space style={{ justifyContent: "space-between", width: "100%" }} wrap>
-                        <Typography.Text>
-                          Total pagos:{" "}
-                          <Typography.Text strong>
-                            {money((servicio?.total_pagos_servicio ?? 0) as any)}
-                          </Typography.Text>
-                        </Typography.Text>
-
-                        <Button type="primary" disabled={locked} onClick={() => setPagoOpen(true)}>
-                          Agregar pago
-                        </Button>
-                      </Space>
-                    </Card>
-
-                    <Card title="Pagos" loading={pagosQuery.isLoading}>
-                      <Table<ServicioPago>
-                        rowKey="id"
-                        columns={pagosCols}
-                        dataSource={pagosQuery.data?.items ?? servicio?.pagos ?? []}
-                        pagination={false}
-                        scroll={{ x: 900 }}
-                      />
-                    </Card>
-
-                    <Modal
-                      title="Agregar pago"
-                      open={pagoOpen}
-                      onCancel={() => setPagoOpen(false)}
-                      okText="Agregar"
-                      okButtonProps={{ loading: addPagoMut.isPending }}
-                      onOk={async () => {
-                        const v = await pagoForm.validateFields();
-                        addPagoMut.mutate(v);
-                      }}
-                    >
-                      <Form form={pagoForm} layout="vertical" initialValues={{ valor: 0 }}>
-                        <Form.Item label="Concepto" name="concepto" rules={[{ required: true, message: "Obligatorio" }]}>
-                          <Input placeholder="Ej: Derechos / Trámite" />
-                        </Form.Item>
-                        <Form.Item label="Valor" name="valor" rules={[{ required: true, message: "Obligatorio" }]}>
-                          <InputNumber min={0} style={{ width: "100%" }} />
-                        </Form.Item>
-                      </Form>
-                    </Modal>
-                  </Space>
+                  <ServicioPagosTab
+                    servicioId={id}
+                    locked={locked}
+                    servicio={servicio}
+                    servicioLabel={template?.nombre ?? servicio?.tipo_servicio}
+                  />
                 ),
               },
               {
@@ -481,3 +406,5 @@ export default function ServicioDetailPage() {
     </>
   );
 }
+
+
